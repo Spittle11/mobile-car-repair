@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Check, Info, Calendar as CalIcon, Clock, MapPin, ChevronRight, ChevronLeft } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Check, Info, Calendar as CalIcon, Clock, MapPin, ChevronRight, ChevronLeft, ExternalLink } from 'lucide-react';
 import './BookingWidget.css';
 
 const SERVICES = [
@@ -10,9 +10,181 @@ const SERVICES = [
   { id: 'detail', name: 'Interior Detail', price: 75, label: "Est. $50-$100" },
 ];
 
+// Service area cities from Santaquin up to Draper
+const SERVICE_CITIES = [
+  { city: 'Santaquin', zip: '84655' },
+  { city: 'Payson', zip: '84651' },
+  { city: 'Salem', zip: '84653' },
+  { city: 'Spanish Fork', zip: '84660' },
+  { city: 'Springville', zip: '84663' },
+  { city: 'Mapleton', zip: '84664' },
+  { city: 'Provo', zip: '84601' },
+  { city: 'Orem', zip: '84097' },
+  { city: 'Lindon', zip: '84042' },
+  { city: 'Pleasant Grove', zip: '84062' },
+  { city: 'American Fork', zip: '84003' },
+  { city: 'Highland', zip: '84003' },
+  { city: 'Cedar Hills', zip: '84062' },
+  { city: 'Lehi', zip: '84043' },
+  { city: 'Saratoga Springs', zip: '84045' },
+  { city: 'Eagle Mountain', zip: '84005' },
+  { city: 'Herriman', zip: '84096' },
+  { city: 'Bluffdale', zip: '84065' },
+  { city: 'Riverton', zip: '84065' },
+  { city: 'South Jordan', zip: '84095' },
+  { city: 'Draper', zip: '84020' },
+];
+
 const TIME_SLOTS = [
   "08:00 AM", "09:30 AM", "11:00 AM", "01:00 PM", "02:30 PM", "04:00 PM"
 ];
+
+const MECHANIC_EMAIL = 'uvmobilecarcare@gmail.com';
+
+function buildGoogleCalendarLink({ date, time, address, selectedServices, paymentMethod, calculateTotal }) {
+  // Parse date
+  const [year, month, day] = date.split('-');
+
+  // Parse time e.g. "08:00 AM"
+  const [timePart, ampm] = time.split(' ');
+  let [hours, minutes] = timePart.split(':').map(Number);
+  if (ampm === 'PM' && hours !== 12) hours += 12;
+  if (ampm === 'AM' && hours === 12) hours = 0;
+
+  const pad = (n) => String(n).padStart(2, '0');
+  const startDT = `${year}${month}${day}T${pad(hours)}${pad(minutes)}00`;
+
+  // End time = start + 1.5 hours
+  let endH = hours + 1;
+  let endM = minutes + 30;
+  if (endM >= 60) { endH += 1; endM -= 60; }
+  const endDT = `${year}${month}${day}T${pad(endH)}${pad(endM)}00`;
+
+  const serviceNames = selectedServices
+    .map(id => SERVICES.find(s => s.id === id)?.name)
+    .filter(Boolean)
+    .join(', ');
+
+  const details = [
+    `Mobile car service appointment`,
+    `Services: ${serviceNames}`,
+    `Estimated Total: $${calculateTotal()}+`,
+    `Payment: ${paymentMethod === 'online' ? 'Credit/Debit Card (Online)' : 'In Person (Cash/Card/Venmo)'}`,
+    ``,
+    `Contact: 480-469-2664`,
+    `Email: ${MECHANIC_EMAIL}`,
+  ].join('\n');
+
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: `Utah Valley Mobile Car Care – ${serviceNames}`,
+    dates: `${startDT}/${endDT}`,
+    details,
+    location: address,
+    add: MECHANIC_EMAIL,
+  });
+
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function CityAutocomplete({ value, onChange }) {
+  const [street, setStreet] = useState('');
+  const [cityQuery, setCityQuery] = useState('');
+  const [selectedCity, setSelectedCity] = useState(null);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef(null);
+
+  const filtered = cityQuery.length > 0
+    ? SERVICE_CITIES.filter(c =>
+        c.city.toLowerCase().includes(cityQuery.toLowerCase())
+      )
+    : SERVICE_CITIES;
+
+  // Combine street + city into the parent address value
+  useEffect(() => {
+    if (street && selectedCity) {
+      onChange(`${street}, ${selectedCity.city}, UT ${selectedCity.zip}`);
+    } else {
+      onChange('');
+    }
+  }, [street, selectedCity]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClick(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setShowDropdown(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  return (
+    <div className="city-autocomplete-wrap">
+      {/* Street Address */}
+      <div className="location-input-wrap">
+        <label>Street Address</label>
+        <div style={{ position: 'relative' }}>
+          <MapPin size={20} color="var(--slate-400)" style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)' }} />
+          <input
+            type="text"
+            placeholder="123 Main St"
+            value={street}
+            onChange={e => setStreet(e.target.value)}
+            style={{ paddingLeft: '48px' }}
+          />
+        </div>
+      </div>
+
+      {/* City Selector */}
+      <div className="location-input-wrap" ref={dropdownRef} style={{ position: 'relative' }}>
+        <label>City <span style={{ color: 'var(--slate-400)', fontWeight: 400 }}>(Service area: Santaquin – Draper)</span></label>
+        <input
+          type="text"
+          placeholder="Search city..."
+          value={selectedCity ? `${selectedCity.city}, UT` : cityQuery}
+          onFocus={() => { setShowDropdown(true); if (selectedCity) { setCityQuery(''); setSelectedCity(null); } }}
+          onChange={e => { setCityQuery(e.target.value); setSelectedCity(null); setShowDropdown(true); }}
+          className={selectedCity ? 'city-selected' : ''}
+        />
+
+        {showDropdown && (
+          <div className="city-dropdown">
+            {filtered.length === 0 ? (
+              <div className="city-dropdown-empty">
+                No cities in service area match "{cityQuery}"
+              </div>
+            ) : (
+              filtered.map(c => (
+                <div
+                  key={c.city}
+                  className={`city-dropdown-item ${selectedCity?.city === c.city ? 'active' : ''}`}
+                  onMouseDown={() => {
+                    setSelectedCity(c);
+                    setCityQuery('');
+                    setShowDropdown(false);
+                  }}
+                >
+                  <MapPin size={14} style={{ flexShrink: 0 }} />
+                  <span>{c.city}, UT <span className="city-zip">{c.zip}</span></span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Preview */}
+      {street && selectedCity && (
+        <div className="address-preview">
+          <Check size={14} />
+          <span>{street}, {selectedCity.city}, UT {selectedCity.zip}</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function BookingWidget() {
   const [step, setStep] = useState(1);
@@ -26,7 +198,7 @@ function BookingWidget() {
   const hasOilChange = selectedServices.includes('oil-sedan') || selectedServices.includes('oil-lrg');
 
   const toggleService = (id) => {
-    setSelectedServices(prev => 
+    setSelectedServices(prev =>
       prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]
     );
   };
@@ -46,7 +218,7 @@ function BookingWidget() {
 
   const canProceed = () => {
     if (step === 1) return selectedServices.length > 0;
-    if (step === 2) return address.trim().length > 5;
+    if (step === 2) return address.trim().length > 10;
     if (step === 3) return date !== '' && time !== '';
     if (step === 4) return paymentMethod !== '';
     return true;
@@ -54,24 +226,39 @@ function BookingWidget() {
 
   const handleNext = () => {
     if (step < 5) setStep(step + 1);
-    else {
-      // Final booking step (simulate API call)
-      setIsBooked(true);
-    }
+    else setIsBooked(true);
   };
 
   if (isBooked) {
+    const calLink = buildGoogleCalendarLink({ date, time, address, selectedServices, paymentMethod, calculateTotal });
+
     return (
       <div className="booking-widget">
-        <div className="booking-body" style={{ textAlign: 'center', padding: '60px 20px' }}>
-          <div style={{ display: 'inline-flex', background: '#dcfce7', color: '#166534', padding: '20px', borderRadius: '50%', marginBottom: '24px' }}>
+        <div className="booking-body booking-confirmed">
+          <div className="confirmed-icon">
             <Check size={48} />
           </div>
-          <h2 className="step-title" style={{ marginBottom: '16px' }}>Booking Confirmed!</h2>
-          <p style={{ color: 'var(--slate-500)', maxWidth: '400px', margin: '0 auto', marginBottom: '24px' }}>
-            Your appointment for <strong>{date} at {time}</strong> is scheduled. Our mechanic will arrive at <strong>{address}</strong>.
+          <h2 className="step-title">Booking Confirmed!</h2>
+          <p className="confirmed-subtitle">
+            Your appointment for <strong>{date} at {time}</strong> is scheduled.<br />
+            Our mechanic will arrive at <strong>{address}</strong>.
           </p>
-          <button className="btn" onClick={() => window.location.reload()}>Book Another Service</button>
+
+          <a
+            href={calLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn cal-btn"
+          >
+            <CalIcon size={20} />
+            Add to Google Calendar
+            <ExternalLink size={16} />
+          </a>
+          <p className="cal-hint">This also sends an invite to our team so we know you're all set!</p>
+
+          <button className="btn btn-secondary" style={{ marginTop: '12px' }} onClick={() => window.location.reload()}>
+            Book Another Service
+          </button>
         </div>
       </div>
     );
@@ -91,7 +278,7 @@ function BookingWidget() {
 
       {/* Body */}
       <div className="booking-body">
-        
+
         {step === 1 && (
           <div className="step-content">
             <h3 className="step-title">What do you need done?</h3>
@@ -111,9 +298,9 @@ function BookingWidget() {
                     <div className="service-price">
                       {srv.label ? srv.label : (isDiscounted ? `$${srv.discountPrice}` : `$${srv.price}`)}
                     </div>
-                    <input 
-                      type="checkbox" 
-                      style={{ display: 'none' }} 
+                    <input
+                      type="checkbox"
+                      style={{ display: 'none' }}
                       checked={isSelected}
                       onChange={() => toggleService(srv.id)}
                     />
@@ -127,20 +314,8 @@ function BookingWidget() {
         {step === 2 && (
           <div className="step-content">
             <h3 className="step-title">Where should we come?</h3>
-            <div className="location-input-wrap">
-              <label>Service Address (Utah Valley Area)</label>
-              <div style={{ position: 'relative' }}>
-                <MapPin size={20} color="var(--slate-400)" style={{ position: 'absolute', left: '16px', top: '16px' }} />
-                <input 
-                  type="text" 
-                  placeholder="123 Example St, Orem, UT" 
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  style={{ paddingLeft: '48px' }}
-                />
-              </div>
-            </div>
-            <div className="info-alert">
+            <CityAutocomplete value={address} onChange={setAddress} />
+            <div className="info-alert" style={{ marginTop: '16px' }}>
               <Info size={20} style={{ flexShrink: 0 }} />
               <span>We are a fully mobile service. Please ensure your vehicle is parked in an accessible driveway or parking lot.</span>
             </div>
@@ -149,29 +324,35 @@ function BookingWidget() {
 
         {step === 3 && (
           <div className="step-content">
-            <h3 className="step-title">Choose a Date & Time</h3>
+            <h3 className="step-title">Choose a Date &amp; Time</h3>
             <div className="info-alert" style={{ marginBottom: '24px' }}>
               <Info size={20} style={{ flexShrink: 0 }} />
               <span>Time slots automatically include a 30-minute buffer for our mechanics to drive to your location.</span>
             </div>
-            
+
             <div className="schedule-grid">
               <div className="date-selector">
-                <label style={{ display: 'block', fontWeight: 600, marginBottom: '12px' }}><CalIcon size={16} style={{ display: 'inline', marginRight: '8px', verticalAlign: 'text-bottom' }}/> Select Date</label>
-                <input 
-                  type="date" 
-                  value={date} 
-                  onChange={(e) => setDate(e.target.value)} 
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: '12px' }}>
+                  <CalIcon size={16} style={{ display: 'inline', marginRight: '8px', verticalAlign: 'text-bottom' }} />
+                  Select Date
+                </label>
+                <input
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
                   min={new Date().toISOString().split('T')[0]}
                 />
               </div>
 
               <div className="time-selector">
-                <label style={{ display: 'block', fontWeight: 600, marginBottom: '12px' }}><Clock size={16} style={{ display: 'inline', marginRight: '8px', verticalAlign: 'text-bottom' }}/> Available Times</label>
+                <label style={{ display: 'block', fontWeight: 600, marginBottom: '12px' }}>
+                  <Clock size={16} style={{ display: 'inline', marginRight: '8px', verticalAlign: 'text-bottom' }} />
+                  Available Times
+                </label>
                 {date ? (
                   <div className="time-slots">
                     {TIME_SLOTS.map(t => (
-                      <div 
+                      <div
                         key={t}
                         className={`time-slot ${time === t ? 'selected' : ''}`}
                         onClick={() => setTime(t)}
@@ -192,21 +373,16 @@ function BookingWidget() {
           <div className="step-content">
             <h3 className="step-title">Payment Options</h3>
             <p style={{ color: 'var(--slate-500)', marginBottom: '24px' }}>How would you like to pay for your service?</p>
-            
+
             <div className="service-options">
               <label className={`service-option-label ${paymentMethod === 'online' ? 'selected' : ''}`}>
                 <div className="service-name-wrap">
                   <div className="checkbox-custom" style={{ borderRadius: '50%' }}>
-                    {paymentMethod === 'online' && <div style={{width: '10px', height: '10px', background: 'var(--accent)', borderRadius: '50%'}}></div>}
+                    {paymentMethod === 'online' && <div style={{ width: '10px', height: '10px', background: 'var(--accent)', borderRadius: '50%' }}></div>}
                   </div>
                   <span>Pay Now Online (Credit/Debit)</span>
                 </div>
-                <input 
-                  type="radio" 
-                  style={{ display: 'none' }} 
-                  checked={paymentMethod === 'online'}
-                  onChange={() => setPaymentMethod('online')}
-                />
+                <input type="radio" style={{ display: 'none' }} checked={paymentMethod === 'online'} onChange={() => setPaymentMethod('online')} />
               </label>
 
               {paymentMethod === 'online' && (
@@ -229,16 +405,11 @@ function BookingWidget() {
               <label className={`service-option-label ${paymentMethod === 'in-person' ? 'selected' : ''}`}>
                 <div className="service-name-wrap">
                   <div className="checkbox-custom" style={{ borderRadius: '50%' }}>
-                    {paymentMethod === 'in-person' && <div style={{width: '10px', height: '10px', background: 'var(--accent)', borderRadius: '50%'}}></div>}
+                    {paymentMethod === 'in-person' && <div style={{ width: '10px', height: '10px', background: 'var(--accent)', borderRadius: '50%' }}></div>}
                   </div>
                   <span>Pay In Person (Cash/Card/Venmo)</span>
                 </div>
-                <input 
-                  type="radio" 
-                  style={{ display: 'none' }} 
-                  checked={paymentMethod === 'in-person'}
-                  onChange={() => setPaymentMethod('in-person')}
-                />
+                <input type="radio" style={{ display: 'none' }} checked={paymentMethod === 'in-person'} onChange={() => setPaymentMethod('in-person')} />
               </label>
             </div>
           </div>
@@ -246,8 +417,8 @@ function BookingWidget() {
 
         {step === 5 && (
           <div className="step-content">
-            <h3 className="step-title">Review & Confirm</h3>
-            
+            <h3 className="step-title">Review &amp; Confirm</h3>
+
             <div className="summary-card">
               <h4 style={{ marginBottom: '16px', color: 'var(--navy)' }}>Service Summary</h4>
               {selectedServices.map(srvId => {
@@ -260,7 +431,6 @@ function BookingWidget() {
                   </div>
                 )
               })}
-              
               <div className="summary-total">
                 <span>Estimated Total</span>
                 <span>${calculateTotal()}+</span>
@@ -285,16 +455,16 @@ function BookingWidget() {
 
       {/* Footer Actions */}
       <div className="booking-footer">
-        <button 
-          className={`btn btn-secondary ${step === 1 ? 'btn-disabled' : ''}`} 
+        <button
+          className={`btn btn-secondary ${step === 1 ? 'btn-disabled' : ''}`}
           onClick={() => step > 1 && setStep(step - 1)}
           disabled={step === 1}
         >
           <ChevronLeft size={20} /> Back
         </button>
-        
-        <button 
-          className={`btn ${!canProceed() ? 'btn-disabled' : ''}`} 
+
+        <button
+          className={`btn ${!canProceed() ? 'btn-disabled' : ''}`}
           onClick={handleNext}
           disabled={!canProceed()}
         >
